@@ -46,6 +46,4 @@ desktop.ini
 *.temp
 
 # ========== 忽略超大字体 SDF Asset（保留本地，不入库）==========
-Assets/testRes/COOPBL SDF.asset
-Assets/testRes/SIMHEI SDF.asset
-Assets/testRes/SIMFANG SDF 1.asset
+Assets/Fonts/*.asset
