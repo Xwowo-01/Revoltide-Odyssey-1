@@ -1,0 +1,51 @@
+# ========== Unity 专用忽略 ==========
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Bb]uild/
+/[Bb]uilds/
+/[Ll]ogs/
+/[Uu]ser[Ss]ettings/
+
+# ========== 版本控制 ==========
+*.csproj
+*.unityproj
+*.sln
+*.suo
+*.user
+*.userprefs
+*.pidb
+*.booproj
+
+# ========== Unity 缓存 ==========
+*.asset.meta
+*.prefab.meta
+*.unity.meta
+*.mat.meta
+*.anim.meta
+
+# ========== 操作系统垃圾 ==========
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ========== 编辑器 ==========
+*.swp
+*.swo
+*.swn
+*~
+
+# ========== Visual Studio ==========
+.vs/
+*.opendb
+*.db
+
+# ========== 包管理 ==========
+/packages/
+*.tmp
+*.temp
+
+# ========== 忽略超大字体 SDF Asset（保留本地，不入库）==========
+Assets/testRes/COOPBL SDF.asset
+Assets/testRes/SIMHEI SDF.asset
+Assets/testRes/SIMFANG SDF 1.asset
