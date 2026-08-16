@@ -107,7 +107,7 @@ Material:
     - _SrcBlend: 1
     - _UVSec: 0
     - _Vignette: 0.4
-    - _WearThreshold: 0.3626516
+    - _WearThreshold: 0.3627451
     - _ZWrite: 1
     m_Colors:
     - _Color: {r: 1, g: 0.8437417, b: 0.6037736, a: 1}

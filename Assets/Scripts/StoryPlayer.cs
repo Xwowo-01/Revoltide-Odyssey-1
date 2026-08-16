@@ -70,17 +70,7 @@ public class StoryPlayer : MonoBehaviour
     {
         if (autoStart)
         {
-            if (string.IsNullOrEmpty(excelFilePath))
-            {
-                Debug.LogError("StoryPlayer: 未设置 Excel 文件路径");
-                return;
-            }
-            if (!File.Exists(excelFilePath))
-            {
-                Debug.LogError($"StoryPlayer: 文件不存在: {excelFilePath}");
-                return;
-            }
-            StartStory();
+            StartStory(); // 由 StartStory 内部处理路径选择与检查
         }
     }
 
