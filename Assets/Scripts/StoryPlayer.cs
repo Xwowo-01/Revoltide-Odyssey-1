@@ -579,7 +579,7 @@ public class StoryPlayer : MonoBehaviour
 
                         if (!validTypes.Contains(type))
                         {
-                            Debug.LogWarning($"StoryPlayer: 跳过无效指令类型 '{type}' (行号: {rowIndex})");
+                            Debug.Log($"StoryPlayer: 跳过无效指令类型 '{type}' (行号: {rowIndex})");
                             continue;
                         }
 
@@ -752,7 +752,7 @@ public class StoryPlayer : MonoBehaviour
         HashSet<string> audioSet = new HashSet<string>();
         foreach (var cmd in commands)
         {
-            if (cmd.Type == "声音控制" && !string.IsNullOrEmpty(cmd.ResourceName))
+            if (cmd.Type == "声音控制" && !string.IsNullOrEmpty(cmd.ResourceName) && (cmd.ResourceName != "无"))
             {
                 audioSet.Add(cmd.ResourceName);
             }
@@ -772,7 +772,7 @@ public class StoryPlayer : MonoBehaviour
         HashSet<string> effectSet = new HashSet<string>();
         foreach (var cmd in commands)
         {
-            if (cmd.Type == "特效控制" && !string.IsNullOrEmpty(cmd.ResourceName))
+            if (cmd.Type == "特效控制" && !string.IsNullOrEmpty(cmd.ResourceName) && (cmd.ResourceName != "无"))
             {
                 effectSet.Add(cmd.ResourceName);
             }
@@ -1050,7 +1050,6 @@ public class StoryPlayer : MonoBehaviour
         }
     }
 
-    // ★ 修改 ExecuteBackground 方法 ★
     private void ExecuteBackground(StoryCommand cmd)
     {
         switch (cmd.Action)

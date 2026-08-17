@@ -6,11 +6,11 @@ using DG.Tweening;
 public class AudioManager : MonoBehaviour
 {
     [Header("音频源")]
-    [SerializeField] private AudioSource bgmSource;   // BGM播放器
+    [SerializeField] private AudioSource bgmSource;
 
     [Header("全局音量（0~1）")]
-    public float musicVolume = 1.0f;
-    public float sfxVolume = 1.0f;
+    [Range(0, 1)] public float musicVolume = 1.0f;
+    [Range(0, 1)] public float sfxVolume = 1.0f;
 
     [Header("对象池设置")]
     public bool preloadAllResources = true;
@@ -24,28 +24,76 @@ public class AudioManager : MonoBehaviour
         UseDefault
     }
 
-    // ---------- 私有成员 ----------
+    // ---------- BGM 相关 ----------
     private Dictionary<string, AudioClip> audioPool = new Dictionary<string, AudioClip>();
-    private Tween currentTween;                 // BGM 渐变动画
+    private Tween bgmTween;                      // 当前 BGM 动画（由 DOTween.To 创建）
     private string currentMusicName = null;
-    private float currentVolume = 0f;
-    private float targetVolume = 0f;
+    private float bgmRelativeCurrent = 0f;      // 当前相对音量（0~1），不乘 musicVolume
+    private float bgmRelativeTarget = 0f;       // 目标相对音量
 
-    // ---- 音效管理 ----
+    // ---------- SFX 相关 ----------
     private class SFXInstance
     {
         public GameObject gameObject;
         public AudioSource audioSource;
         public bool isLoop;
         public string clipName;
-        public float volume;
+        public float relativeVolume;            // 用户传入的原始音量
     }
 
-    private List<SFXInstance> sfxInstances = new List<SFXInstance>(); // 用于存档的循环音效列表（名称->音量）
+    private List<SFXInstance> sfxInstances = new List<SFXInstance>();
     private Dictionary<string, float> loopSFXVolumes = new Dictionary<string, float>();
 
+    // ---------- 编辑器辅助 ----------
+    private float _lastMusicVolume;
+    private float _lastSfxVolume;
+
     // ========================================================
-    // 公共方法
+    // 生命周期
+    // ========================================================
+
+    private void Awake()
+    {
+        _lastMusicVolume = musicVolume;
+        _lastSfxVolume = sfxVolume;
+    }
+
+    private void OnValidate()
+    {
+        if (!Mathf.Approximately(musicVolume, _lastMusicVolume))
+        {
+            UpdateMusicVolume(musicVolume);
+            _lastMusicVolume = musicVolume;
+        }
+        if (!Mathf.Approximately(sfxVolume, _lastSfxVolume))
+        {
+            UpdateSFXVolume(sfxVolume);
+            _lastSfxVolume = sfxVolume;
+        }
+    }
+
+    // ========================================================
+    // 运行时调整全局音量
+    // ========================================================
+
+    public void SetMusicVolume(float newVol)
+    {
+        newVol = Mathf.Clamp01(newVol);
+        musicVolume = newVol;
+        UpdateMusicVolume(newVol);
+        _lastMusicVolume = newVol;
+    }
+
+    public void SetSFXVolume(float newVol)
+    {
+        newVol = Mathf.Clamp01(newVol);
+        sfxVolume = newVol;
+        UpdateSFXVolume(newVol);
+        _lastSfxVolume = newVol;
+    }
+
+    // ========================================================
+    // 核心方法
     // ========================================================
 
     public void InitAudio(string[] audioNames)
@@ -69,34 +117,45 @@ public class AudioManager : MonoBehaviour
         else
         {
             Debug.LogWarning("未指定音频列表，且 preloadAllResources 为 false，对象池为空。");
-        }       
-        StopAllCoroutines(); // 重置BGM状态
-        KillCurrentTween();
+        }
+
+        KillBgmTween();
         bgmSource.Stop();
         bgmSource.clip = null;
         currentMusicName = null;
-        currentVolume = 0f;
-        targetVolume = 0f;
-        bgmSource.volume = 0f;        
-        ClearAllSFX();// 清理所有音效
+        bgmRelativeCurrent = 0f;
+        bgmRelativeTarget = 0f;
+        bgmSource.volume = 0f;
+        ClearAllSFX();
     }
 
-    // ---- BGM 方法 ----
+    // ---- BGM ----
     public void FadeInMusic(string musicName, float duration, float targetVol)
     {
-        KillCurrentTween();
-        float vol = Mathf.Clamp01(targetVol) * musicVolume;
+        KillBgmTween();
+        bgmRelativeTarget = Mathf.Clamp01(targetVol);
         AudioClip clip = GetClipFromPool(musicName);
         if (clip == null) return;
+
         bgmSource.clip = clip;
         bgmSource.volume = 0f;
-        currentVolume = 0f;
-        targetVolume = vol;
+        bgmRelativeCurrent = 0f;
         currentMusicName = musicName;
         bgmSource.Play();
-        currentTween = bgmSource.DOFade(vol, duration)
-            .OnUpdate(() => { currentVolume = bgmSource.volume; })
-            .OnComplete(() => { currentTween = null; });
+
+        bgmTween = DOTween.To(
+            () => bgmRelativeCurrent,
+            x =>
+            {
+                bgmRelativeCurrent = x;
+                bgmSource.volume = x * musicVolume;
+            },
+            bgmRelativeTarget,
+            duration
+        ).OnComplete(() =>
+        {
+            bgmTween = null;
+        });
     }
 
     public void FadeOutMusic(float duration)
@@ -106,58 +165,81 @@ public class AudioManager : MonoBehaviour
             Debug.Log("无音乐播放或已静音，跳过淡出");
             return;
         }
-        KillCurrentTween();
-        targetVolume = 0f;
-        currentTween = bgmSource.DOFade(0f, duration)
-            .OnUpdate(() => { currentVolume = bgmSource.volume; })
-            .OnComplete(() =>
+
+        KillBgmTween();
+        bgmRelativeTarget = 0f;
+
+        bgmTween = DOTween.To(
+            () => bgmRelativeCurrent,
+            x =>
             {
-                bgmSource.Stop();
-                currentMusicName = null;
-                currentVolume = 0f;
-                currentTween = null;
-            });
+                bgmRelativeCurrent = x;
+                bgmSource.volume = x * musicVolume;
+            },
+            0f,
+            duration
+        ).OnComplete(() =>
+        {
+            bgmSource.Stop();
+            currentMusicName = null;
+            bgmRelativeCurrent = 0f;
+            bgmRelativeTarget = 0f;
+            bgmTween = null;
+        });
     }
 
     public void SwitchMusic(string musicName, float duration, float targetVol)
     {
-        KillCurrentTween();
+        KillBgmTween();
         float half = duration * 0.5f;
-        float vol = Mathf.Clamp01(targetVol) * musicVolume;
+        bgmRelativeTarget = Mathf.Clamp01(targetVol);
+
         if (bgmSource.clip == null || bgmSource.volume <= 0.001f)
         {
             FadeInMusic(musicName, duration, targetVol);
             return;
         }
-        targetVolume = 0f;
-        Tween fadeOut = bgmSource.DOFade(0f, half)
-            .OnUpdate(() => { currentVolume = bgmSource.volume; })
-            .OnComplete(() =>
+
+        // 先淡出到 0
+        bgmTween = DOTween.To(
+            () => bgmRelativeCurrent,
+            x =>
             {
-                AudioClip clip = GetClipFromPool(musicName);
-                if (clip == null) return;
-                bgmSource.clip = clip;
-                bgmSource.volume = 0f;
-                currentVolume = 0f;
-                currentMusicName = musicName;
-                bgmSource.Play();
+                bgmRelativeCurrent = x;
+                bgmSource.volume = x * musicVolume;
+            },
+            0f,
+            half
+        ).OnComplete(() =>
+        {
+            // 切换音频
+            AudioClip clip = GetClipFromPool(musicName);
+            if (clip == null) return;
+            bgmSource.clip = clip;
+            bgmSource.volume = 0f;
+            bgmRelativeCurrent = 0f;
+            currentMusicName = musicName;
+            bgmSource.Play();
 
-                Tween fadeIn = bgmSource.DOFade(vol, half)
-                    .OnUpdate(() => { currentVolume = bgmSource.volume; })
-                    .OnComplete(() =>
-                    {
-                        targetVolume = vol;
-                        currentTween = null;
-                    });
-
-                currentTween = fadeIn;
+            // 淡入到目标
+            bgmTween = DOTween.To(
+                () => bgmRelativeCurrent,
+                x =>
+                {
+                    bgmRelativeCurrent = x;
+                    bgmSource.volume = x * musicVolume;
+                },
+                bgmRelativeTarget,
+                half
+            ).OnComplete(() =>
+            {
+                bgmTween = null;
             });
-
-        currentTween = fadeOut;
-        targetVolume = vol;
+        });
     }
-       
-    public void PlaySFX(string sfxName, string mode, float volume) // ---- 音效方法 ----
+
+    // ---- SFX ----
+    public void PlaySFX(string sfxName, string mode, float volume)
     {
         AudioClip clip = GetClipFromPool(sfxName);
         if (clip == null)
@@ -165,46 +247,54 @@ public class AudioManager : MonoBehaviour
             Debug.LogWarning($"音效 '{sfxName}' 未找到，无法播放");
             return;
         }
-        float finalVol = Mathf.Clamp01(volume) * sfxVolume;
-        bool isLoop = (mode == "循环");        
-        GameObject go = new GameObject($"SFX_{sfxName}_{(isLoop ? "Loop" : "OneShot")}");// 创建音效对象
+
+        float relativeVol = Mathf.Clamp01(volume);
+        float finalVol = relativeVol * sfxVolume;
+        bool isLoop = (mode == "循环");
+
+        GameObject go = new GameObject($"SFX_{sfxName}_{(isLoop ? "Loop" : "OneShot")}");
         go.transform.SetParent(transform, false);
         AudioSource src = go.AddComponent<AudioSource>();
         src.clip = clip;
         src.volume = finalVol;
         src.loop = isLoop;
         src.Play();
-        SFXInstance instance = new SFXInstance();
-        instance.gameObject = go;
-        instance.audioSource = src;
-        instance.isLoop = isLoop;
-        instance.clipName = sfxName;
-        instance.volume = finalVol;
-        sfxInstances.Add(instance);       
-        if (isLoop) // 如果循环，记录到存档字典
+
+        SFXInstance inst = new SFXInstance
         {
-            loopSFXVolumes[sfxName] = finalVol;
+            gameObject = go,
+            audioSource = src,
+            isLoop = isLoop,
+            clipName = sfxName,
+            relativeVolume = relativeVol
+        };
+        sfxInstances.Add(inst);
+
+        if (isLoop)
+        {
+            loopSFXVolumes[sfxName] = relativeVol;
         }
     }
 
-    /// <summary>
-    /// 停止所有音效（淡出后删除），供继续剧情时调用
-    /// </summary>
     public void StopAllSFX(float fadeDuration = 0.5f)
     {
-        if (sfxInstances.Count == 0) return;       
-        List<SFXInstance> instances = new List<SFXInstance>(sfxInstances); // 复制列表，因为会在回调中修改
-        foreach (var inst in instances)        {
+        if (sfxInstances.Count == 0) return;
+
+        List<SFXInstance> instances = new List<SFXInstance>(sfxInstances);
+        foreach (var inst in instances)
+        {
             if (inst == null || inst.gameObject == null) continue;
             AudioSource src = inst.audioSource;
-            if (src == null) continue;                        
-            if (!inst.isLoop && !src.isPlaying)// 如果音效已经停止播放（单次已播完），直接销毁
+            if (src == null) continue;
+
+            if (!inst.isLoop && !src.isPlaying)
             {
                 Destroy(inst.gameObject);
                 sfxInstances.Remove(inst);
                 continue;
-            }           
-            src.DOFade(0f, fadeDuration).OnComplete(() => // 否则淡出
+            }
+
+            src.DOFade(0f, fadeDuration).OnComplete(() =>
             {
                 if (inst.gameObject != null)
                 {
@@ -212,9 +302,10 @@ public class AudioManager : MonoBehaviour
                     Destroy(inst.gameObject);
                 }
             });
-        }       
-        sfxInstances.Clear(); // 清空列表（因为上面的回调会异步删除，但我们先从列表中移除，避免重复操作）       
-        loopSFXVolumes.Clear(); // 清空循环音效记录
+        }
+
+        sfxInstances.Clear();
+        loopSFXVolumes.Clear();
     }
 
     private void ClearAllSFX()
@@ -228,16 +319,9 @@ public class AudioManager : MonoBehaviour
         loopSFXVolumes.Clear();
     }
 
-    /// <summary>
-    /// 立即完成当前BGM动画（仅用于紧急清理，不应用于Skip）
-    /// </summary>
     public void CompleteCurrent()
     {
-        if (currentTween != null)
-        {
-            currentTween.Kill(true);
-            currentTween = null;
-        } // 不修改音量，保留当前播放状态
+        KillBgmTween();
     }
 
     // ========================================================
@@ -248,50 +332,50 @@ public class AudioManager : MonoBehaviour
     public class AudioSaveData
     {
         public string musicName;
-        public float volume;
+        public float musicRelativeVolume;   // 相对音量（0~1）
         public bool isPlaying;
-        public List<LoopSFXData> loopSFXList; // 循环音效列表
+        public List<LoopSFXData> loopSFXList;
     }
 
     [System.Serializable]
     public class LoopSFXData
     {
         public string sfxName;
-        public float volume;
+        public float volume;   // 相对音量
     }
 
     public AudioSaveData GetSaveData()
     {
-        AudioSaveData data = new AudioSaveData();
-        data.musicName = currentMusicName;
-        data.volume = bgmSource.volume;
-        data.isPlaying = bgmSource.isPlaying;
+        AudioSaveData data = new AudioSaveData
+        {
+            musicName = currentMusicName,
+            musicRelativeVolume = bgmRelativeCurrent,
+            isPlaying = bgmSource.isPlaying,
+            loopSFXList = new List<LoopSFXData>()
+        };
 
-        // 保存循环音效
-        data.loopSFXList = new List<LoopSFXData>();
         foreach (var kvp in loopSFXVolumes)
         {
-            LoopSFXData sfxData = new LoopSFXData();
-            sfxData.sfxName = kvp.Key;
-            sfxData.volume = kvp.Value;
-            data.loopSFXList.Add(sfxData);
+            data.loopSFXList.Add(new LoopSFXData { sfxName = kvp.Key, volume = kvp.Value });
         }
         return data;
     }
 
     public void LoadSaveData(AudioSaveData data)
-    {        
-        KillCurrentTween();// 清理当前状态
-        ClearAllSFX();        
-        if (!string.IsNullOrEmpty(data.musicName))// 恢复BGM
+    {
+        KillBgmTween();
+        ClearAllSFX();
+
+        // 恢复 BGM
+        if (!string.IsNullOrEmpty(data.musicName))
         {
             AudioClip clip = GetClipFromPool(data.musicName);
             if (clip != null)
             {
                 bgmSource.clip = clip;
-                bgmSource.volume = data.volume;
-                currentVolume = data.volume;
-                targetVolume = data.volume;
+                bgmRelativeCurrent = Mathf.Clamp01(data.musicRelativeVolume);
+                bgmRelativeTarget = bgmRelativeCurrent;
+                bgmSource.volume = bgmRelativeCurrent * musicVolume;
                 currentMusicName = data.musicName;
                 if (data.isPlaying)
                     bgmSource.Play();
@@ -303,6 +387,8 @@ public class AudioManager : MonoBehaviour
                 bgmSource.clip = null;
                 bgmSource.Stop();
                 currentMusicName = null;
+                bgmRelativeCurrent = 0f;
+                bgmRelativeTarget = 0f;
             }
         }
         else
@@ -310,18 +396,22 @@ public class AudioManager : MonoBehaviour
             bgmSource.clip = null;
             bgmSource.Stop();
             currentMusicName = null;
-        }       
-        if (data.loopSFXList != null) // 恢复循环音效
+            bgmRelativeCurrent = 0f;
+            bgmRelativeTarget = 0f;
+        }
+
+        // 恢复循环音效
+        if (data.loopSFXList != null)
         {
             foreach (var sfxData in data.loopSFXList)
-            {               
-                PlaySFX(sfxData.sfxName, "循环", sfxData.volume); // 重新创建并播放
+            {
+                PlaySFX(sfxData.sfxName, "循环", sfxData.volume);
             }
         }
     }
 
     // ========================================================
-    // 私有辅助方法
+    // 私有辅助
     // ========================================================
 
     private void LoadAudioToPool(string name)
@@ -351,17 +441,45 @@ public class AudioManager : MonoBehaviour
         }
     }
 
-    private void KillCurrentTween()
+    private void KillBgmTween()
     {
-        if (currentTween != null)
+        if (bgmTween != null)
         {
-            currentTween.Kill(true);
-            currentTween = null;
+            bgmTween.Kill(true);
+            bgmTween = null;
         }
     }
 
     private void OnDestroy()
     {
         ClearAllSFX();
+    }
+
+    // ========================================================
+    // 全局音量实时更新
+    // ========================================================
+
+    private void UpdateMusicVolume(float newMusicVol)
+    {
+        if (bgmSource == null) return;
+
+        // 直接根据当前相对音量计算绝对音量
+        bgmSource.volume = bgmRelativeCurrent * newMusicVol;
+
+        // 如果当前有动画，动画的 OnUpdate 会持续更新，所以无需额外操作
+        // 但为了立即响应，我们已设置当前音量，下次动画帧会再次覆盖，但目标值不变，
+        // 所以音量会保持在正确值（因为 OnUpdate 使用 x * musicVolume，而 musicVolume 已变）
+        // 注意：bgmRelativeCurrent 是动画驱动的，不会因 musicVolume 改变而改变。
+    }
+
+    private void UpdateSFXVolume(float newSfxVol)
+    {
+        foreach (var inst in sfxInstances)
+        {
+            if (inst.audioSource != null)
+            {
+                inst.audioSource.volume = inst.relativeVolume * newSfxVol;
+            }
+        }
     }
 }

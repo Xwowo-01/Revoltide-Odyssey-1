@@ -514,8 +514,8 @@ public class CharacterManager : MonoBehaviour
         go.transform.localScale = Vector3.one;
         targetScales[objectName] = Vector3.one;
 
-        Mask mask = go.AddComponent<Mask>();
-        mask.showMaskGraphic = true;
+        //Mask mask = go.AddComponent<Mask>();
+        //mask.showMaskGraphic = true;
 
         characters[objectName] = go;
         charResourceMap[objectName] = resourceName;
